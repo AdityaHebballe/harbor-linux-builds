@@ -1,0 +1,187 @@
+name: Build Harbor Linux Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Upstream Harbor tag to build, for example v0.9.12. Leave empty for latest release.
+        required: false
+        type: string
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: harbor-linux-${{ github.event.inputs.tag || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve upstream tag
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INPUT_TAG}" ]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="$(gh api repos/harborstremio/harbor/releases/latest --jq '.tag_name')"
+          fi
+
+          if [ -z "${tag}" ] || [ "${tag}" = "null" ]; then
+            echo "Could not resolve upstream tag" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check existing release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "Release ${TAG} already exists, but manual run will rebuild it."
+              echo "should_build=true" >> "${GITHUB_OUTPUT}"
+            else
+              echo "Release ${TAG} already exists; nothing to do."
+              echo "should_build=false" >> "${GITHUB_OUTPUT}"
+            fi
+          else
+            echo "should_build=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+  build:
+    name: Build Linux bundles
+    needs: resolve
+    if: needs.resolve.outputs.should_build == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Harbor
+        uses: actions/checkout@v4
+        with:
+          repository: harborstremio/harbor
+          ref: ${{ needs.resolve.outputs.tag }}
+          path: harbor
+
+      - name: Install Linux dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            ca-certificates \
+            ffmpeg \
+            libarchive-tools \
+            libasound2-dev \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            libmpv-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            patchelf \
+            pkg-config \
+            yt-dlp
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: harbor/pnpm-lock.yaml
+
+      - name: Prepare Linux build
+        working-directory: harbor
+        run: |
+          set -euo pipefail
+
+          node <<'EOF'
+          const fs = require('fs');
+          const path = 'src-tauri/tauri.conf.json';
+          const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+          config.bundle.createUpdaterArtifacts = false;
+          fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+          EOF
+
+          mkdir -p src-tauri/binaries
+          ln -sf /usr/bin/ffmpeg src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
+          ln -sf /usr/bin/ffprobe src-tauri/binaries/ffprobe-x86_64-unknown-linux-gnu
+          ln -sf /usr/bin/yt-dlp src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu
+
+          if [ ! -f pnpm-workspace.yaml ]; then
+            cat > pnpm-workspace.yaml <<'EOF'
+          allowBuilds:
+            esbuild: true
+          EOF
+          fi
+
+      - name: Install JavaScript dependencies
+        working-directory: harbor
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Debian bundle
+        working-directory: harbor
+        env:
+          CARGO_BUILD_JOBS: "2"
+        run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles deb
+
+      - name: Collect artifacts
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -type f -name '*.deb' -print -exec cp -v {} dist/ \;
+
+          if ! find dist -maxdepth 1 -type f -name '*.deb' | grep -q .; then
+            echo "No Debian bundle was produced" >&2
+            exit 1
+          fi
+
+          cd dist
+          sha256sum * > "SHA256SUMS-${VERSION}.txt"
+          ls -lh
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          name: Harbor Linux ${{ needs.resolve.outputs.tag }}
+          body: |
+            Unofficial Linux build of Harbor from upstream tag `${{ needs.resolve.outputs.tag }}`.
+
+            Source: https://github.com/harborstremio/harbor/tree/${{ needs.resolve.outputs.tag }}
+
+            These binaries are built by this repository's GitHub Actions workflow, not by upstream Harbor.
+          files: dist/*
+          fail_on_unmatched_files: true
+          make_latest: true
+          overwrite_files: true
