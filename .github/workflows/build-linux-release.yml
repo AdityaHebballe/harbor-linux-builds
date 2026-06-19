@@ -150,25 +150,30 @@ jobs:
 
       - name: Build Debian bundle
         working-directory: harbor
-        env:
-          CARGO_BUILD_JOBS: "2"
         run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles deb
 
       - name: Collect artifacts
+        id: artifacts
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist
-          find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -type f -name '*.deb' -print -exec cp -v {} dist/ \;
 
-          if ! find dist -maxdepth 1 -type f -name '*.deb' | grep -q .; then
+          deb="$(find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -type f -name '*.deb' | head -n 1)"
+          if [ -z "${deb}" ]; then
             echo "No Debian bundle was produced" >&2
             exit 1
           fi
 
+          asset="Harbor_${VERSION}_amd64.deb"
+          cp -v "${deb}" "dist/${asset}"
+
           cd dist
           sha256sum * > "SHA256SUMS-${VERSION}.txt"
+          sha256="$(sha256sum "${asset}" | awk '{print $1}')"
+          echo "deb_asset=${asset}" >> "${GITHUB_OUTPUT}"
+          echo "deb_sha256=${sha256}" >> "${GITHUB_OUTPUT}"
           ls -lh
 
       - name: Publish release
@@ -186,3 +191,121 @@ jobs:
           fail_on_unmatched_files: true
           make_latest: true
           overwrite_files: true
+
+      - name: Configure AUR SSH
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AUR_SSH_PRIVATE_KEY}" ]; then
+            echo "AUR_SSH_PRIVATE_KEY is not set." >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          install -m 600 /dev/null ~/.ssh/aur
+          printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" > ~/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            HostName aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+          EOF
+
+      - name: Update AUR package
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          DEB_ASSET: ${{ steps.artifacts.outputs.deb_asset }}
+          DEB_SHA256: ${{ steps.artifacts.outputs.deb_sha256 }}
+        run: |
+          set -euo pipefail
+
+          tmpdir="$(mktemp -d)"
+          git clone ssh://aur@aur.archlinux.org/harbor-stremio-bin.git "${tmpdir}"
+
+          cat > "${tmpdir}/PKGBUILD" <<EOF
+          # Maintainer: Aditya Hebballe <adityahebballe@proton.me>
+
+          pkgname=harbor-stremio-bin
+          _pkgname=harbor
+          pkgver=${VERSION}
+          pkgrel=1
+          pkgdesc='A Stremio client built for adventure (binary release)'
+          arch=('x86_64')
+          url='https://github.com/harborstremio/harbor'
+          license=('MIT')
+
+          depends=(
+            'ffmpeg'
+            'gst-libav'
+            'gst-plugins-bad'
+            'gst-plugins-good'
+            'gtk3'
+            'libayatana-appindicator'
+            'mpv'
+            'webkit2gtk-4.1'
+            'yt-dlp'
+          )
+
+          makedepends=('libarchive')
+
+          provides=('harbor-stremio' 'harbor')
+          conflicts=('harbor-stremio' 'harbor' 'harbor-stremio-git')
+
+          source=("https://github.com/AdityaHebballe/harbor-linux-builds/releases/download/v\${pkgver}/${DEB_ASSET}")
+          sha256sums=('${DEB_SHA256}')
+
+          package() {
+            rm -rf "\$srcdir/deb-extract"
+            mkdir -p "\$srcdir/deb-extract"
+            bsdtar -xf "\$srcdir/${DEB_ASSET}" -C "\$srcdir/deb-extract"
+
+            local data_archive
+            data_archive="\$(find "\$srcdir/deb-extract" -maxdepth 1 -type f -name 'data.tar.*' | head -n 1)"
+            if [[ -z "\$data_archive" ]]; then
+              echo "Debian data archive not found" >&2
+              return 1
+            fi
+
+            bsdtar -xf "\$data_archive" -C "\$pkgdir"
+
+            rm -f "\$pkgdir/usr/bin/ffmpeg" \\
+                  "\$pkgdir/usr/bin/ffprobe" \\
+                  "\$pkgdir/usr/bin/yt-dlp"
+
+            if [[ -x "\$pkgdir/usr/bin/harbor" && ! -e "\$pkgdir/usr/bin/harbor-stremio" ]]; then
+              ln -s harbor "\$pkgdir/usr/bin/harbor-stremio"
+            fi
+          }
+          EOF
+
+          docker run --rm \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
+            -v "${tmpdir}:/workspace" \
+            -w /workspace \
+            archlinux:base-devel \
+            bash -lc '
+              set -euo pipefail
+              pacman -Syu --noconfirm libarchive
+              groupadd -g "$HOST_GID" builder || true
+              useradd -m -u "$HOST_UID" -g "$HOST_GID" builder
+              chown -R builder:"$HOST_GID" /workspace
+              runuser -u builder -- makepkg --printsrcinfo > .SRCINFO
+            '
+
+          cd "${tmpdir}"
+          if git diff --quiet; then
+            echo "AUR already current."
+            exit 0
+          fi
+
+          git config user.name "Aditya Hebballe"
+          git config user.email "adityahebballe@proton.me"
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update to ${VERSION}"
+          git push
