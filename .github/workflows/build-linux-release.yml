@@ -125,23 +125,24 @@ jobs:
 
           node <<'EOF'
           const fs = require('fs');
-          const path = 'src-tauri/tauri.conf.json';
-          const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const tauriConfigPath = 'src-tauri/tauri.conf.json';
+          const config = JSON.parse(fs.readFileSync(tauriConfigPath, 'utf8'));
           config.bundle.createUpdaterArtifacts = false;
-          fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+          fs.writeFileSync(tauriConfigPath, `${JSON.stringify(config, null, 2)}\n`);
+
+          const packagePath = 'package.json';
+          const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          packageJson.pnpm = packageJson.pnpm || {};
+          packageJson.pnpm.onlyBuiltDependencies = Array.from(
+            new Set([...(packageJson.pnpm.onlyBuiltDependencies || []), 'esbuild'])
+          );
+          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
           EOF
 
           mkdir -p src-tauri/binaries
           ln -sf /usr/bin/ffmpeg src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
           ln -sf /usr/bin/ffprobe src-tauri/binaries/ffprobe-x86_64-unknown-linux-gnu
           ln -sf /usr/bin/yt-dlp src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu
-
-          if [ ! -f pnpm-workspace.yaml ]; then
-            cat > pnpm-workspace.yaml <<'EOF'
-          allowBuilds:
-            esbuild: true
-          EOF
-          fi
 
       - name: Install JavaScript dependencies
         working-directory: harbor
