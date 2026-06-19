@@ -24,6 +24,7 @@ jobs:
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
+      contains_linux_fix: ${{ steps.resolve.outputs.contains_linux_fix }}
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
       - name: Resolve tag
@@ -46,11 +47,21 @@ jobs:
           fi
 
           version="${tag#v}"
+          tag_commit="$(gh api "repos/harborstremio/harbor/git/ref/tags/${tag}" --jq '.object.sha')"
+          compare_status="$(gh api "repos/harborstremio/harbor/compare/7eaf9d4...${tag_commit}" --jq '.status')"
+
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          if echo "${compare_status}" | grep -Eq '^(identical|ahead)$'; then
+            echo "contains_linux_fix=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Upstream tag ${tag} does not contain Linux build fix 7eaf9d4; skipping."
+            echo "contains_linux_fix=false" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Check existing release
         id: check
+        if: steps.resolve.outputs.contains_linux_fix == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.resolve.outputs.tag }}
@@ -72,7 +83,7 @@ jobs:
   build:
     name: Build Linux bundles
     needs: resolve
-    if: needs.resolve.outputs.should_build == 'true'
+    if: needs.resolve.outputs.contains_linux_fix == 'true' && needs.resolve.outputs.should_build == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Harbor
