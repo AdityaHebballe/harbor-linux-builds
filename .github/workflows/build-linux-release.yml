@@ -302,7 +302,7 @@ jobs:
           package() {
             rm -rf "\$srcdir/deb-extract"
             mkdir -p "\$srcdir/deb-extract"
-            bsdtar -xf "\$srcdir/${DEB_ASSET}" -C "\$srcdir/deb-extract"
+            bsdtar --no-same-owner -xf "\$srcdir/${DEB_ASSET}" -C "\$srcdir/deb-extract"
 
             local data_archive
             data_archive="\$(find "\$srcdir/deb-extract" -maxdepth 1 -type f -name 'data.tar.*' | head -n 1)"
@@ -311,7 +311,7 @@ jobs:
               return 1
             fi
 
-            bsdtar -xf "\$data_archive" -C "\$pkgdir"
+            bsdtar --no-same-owner -xf "\$data_archive" -C "\$pkgdir"
 
             rm -f "\$pkgdir/usr/bin/ffmpeg" \\
                   "\$pkgdir/usr/bin/ffprobe" \\
