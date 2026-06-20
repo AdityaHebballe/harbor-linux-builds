@@ -258,13 +258,22 @@ jobs:
           tmpdir="$(mktemp -d)"
           git clone ssh://aur@aur.archlinux.org/harbor-stremio-bin.git "${tmpdir}"
 
+          pkgrel=1
+          if [ -f "${tmpdir}/PKGBUILD" ]; then
+            current_pkgver="$(awk -F= '/^pkgver=/{print $2; exit}' "${tmpdir}/PKGBUILD")"
+            current_pkgrel="$(awk -F= '/^pkgrel=/{print $2; exit}' "${tmpdir}/PKGBUILD")"
+            if [ "${current_pkgver}" = "${VERSION}" ] && echo "${current_pkgrel}" | grep -Eq '^[0-9]+$'; then
+              pkgrel="$((current_pkgrel + 1))"
+            fi
+          fi
+
           cat > "${tmpdir}/PKGBUILD" <<EOF
           # Maintainer: Aditya Hebballe <adityahebballe@proton.me>
 
           pkgname=harbor-stremio-bin
           _pkgname=harbor
           pkgver=${VERSION}
-          pkgrel=1
+          pkgrel=${pkgrel}
           pkgdesc='A Stremio client built for adventure (binary release)'
           arch=('x86_64')
           url='https://github.com/harborstremio/harbor'
