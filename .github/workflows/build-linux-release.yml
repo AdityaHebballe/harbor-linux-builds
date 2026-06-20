@@ -20,7 +20,7 @@ concurrency:
 jobs:
   resolve:
     name: Resolve upstream tag
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
@@ -84,7 +84,7 @@ jobs:
     name: Build Linux bundles
     needs: resolve
     if: needs.resolve.outputs.contains_linux_fix == 'true' && needs.resolve.outputs.should_build == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Harbor
         uses: actions/checkout@v4
@@ -162,6 +162,26 @@ jobs:
       - name: Build Debian bundle
         working-directory: harbor
         run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles deb
+
+      - name: Validate Linux library ABI
+        run: |
+          set -euo pipefail
+
+          deb="$(find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -type f -name '*.deb' | head -n 1)"
+          if [ -z "${deb}" ]; then
+            echo "No Debian bundle was produced" >&2
+            exit 1
+          fi
+
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "${tmpdir}"' EXIT
+          dpkg-deb -x "${deb}" "${tmpdir}"
+
+          readelf -d "${tmpdir}/usr/bin/harbor" | grep 'Shared library: \[libmpv.so.2\]'
+          if readelf -d "${tmpdir}/usr/bin/harbor" | grep -q 'Shared library: \[libmpv.so.1\]'; then
+            echo "Harbor is linked against libmpv.so.1; Arch mpv provides libmpv.so.2." >&2
+            exit 1
+          fi
 
       - name: Collect artifacts
         id: artifacts
