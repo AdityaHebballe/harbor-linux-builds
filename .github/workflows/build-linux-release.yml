@@ -64,11 +64,12 @@ jobs:
         if: steps.resolve.outputs.contains_linux_fix == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           TAG: ${{ steps.resolve.outputs.tag }}
         run: |
           set -euo pipefail
 
-          if gh release view "${TAG}" >/dev/null 2>&1; then
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
               echo "Release ${TAG} already exists, but manual run will rebuild it."
               echo "should_build=true" >> "${GITHUB_OUTPUT}"
