@@ -158,7 +158,9 @@ jobs:
 
       - name: Install JavaScript dependencies
         working-directory: harbor
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --lockfile-only --no-frozen-lockfile
+          pnpm install --frozen-lockfile
 
       - name: Build Debian bundle
         working-directory: harbor
