@@ -7,6 +7,14 @@ on:
         description: Upstream Harbor tag to build, for example v0.9.12. Leave empty for latest release.
         required: false
         type: string
+      build_scope:
+        description: Build all Linux release formats or only rebuild the AppImage.
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - appimage
       update_aur:
         description: Push updated PKGBUILD to AUR after a successful build.
         required: false
@@ -169,18 +177,23 @@ jobs:
           pnpm install --frozen-lockfile
 
       - name: Build Debian bundle
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
         working-directory: harbor
         run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles deb
 
       - name: Build RPM bundle
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
         working-directory: harbor
         run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles rpm
 
       - name: Build AppImage bundle
         working-directory: harbor
+        env:
+          NO_STRIP: "true"
         run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles appimage
 
       - name: Validate Linux library ABI
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
         run: |
           set -euo pipefail
 
@@ -203,10 +216,41 @@ jobs:
       - name: Collect artifacts
         id: artifacts
         env:
+          BUILD_SCOPE: ${{ github.event.inputs.build_scope || 'all' }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
           VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist
+
+          appimage="$(find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage -type f -name '*.AppImage' | head -n 1)"
+          if [ -z "${appimage}" ]; then
+            echo "No AppImage bundle was produced" >&2
+            exit 1
+          fi
+
+          appimage_asset="Harbor_${VERSION}_amd64.AppImage"
+          cp -v "${appimage}" "dist/${appimage_asset}"
+
+          if [ "${BUILD_SCOPE}" = "appimage" ]; then
+            checksum_asset="SHA256SUMS-${VERSION}.txt"
+            if gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null 2>&1; then
+              gh release download "${TAG}" \
+                --repo "${REPOSITORY}" \
+                --pattern "${checksum_asset}" \
+                --dir dist \
+                --clobber || true
+            fi
+            touch "dist/${checksum_asset}"
+            awk -v asset="${appimage_asset}" '$2 != asset' "dist/${checksum_asset}" > "dist/${checksum_asset}.tmp"
+            mv "dist/${checksum_asset}.tmp" "dist/${checksum_asset}"
+            sha256sum "dist/${appimage_asset}" | sed 's|dist/||' >> "dist/${checksum_asset}"
+            sort -k2 -o "dist/${checksum_asset}" "dist/${checksum_asset}"
+            ls -lh dist
+            exit 0
+          fi
 
           deb="$(find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -type f -name '*.deb' | head -n 1)"
           if [ -z "${deb}" ]; then
@@ -220,18 +264,10 @@ jobs:
             exit 1
           fi
 
-          appimage="$(find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage -type f -name '*.AppImage' | head -n 1)"
-          if [ -z "${appimage}" ]; then
-            echo "No AppImage bundle was produced" >&2
-            exit 1
-          fi
-
           deb_asset="Harbor_${VERSION}_amd64.deb"
           rpm_asset="Harbor-${VERSION}-1.x86_64.rpm"
-          appimage_asset="Harbor_${VERSION}_amd64.AppImage"
           cp -v "${deb}" "dist/${deb_asset}"
           cp -v "${rpm}" "dist/${rpm_asset}"
-          cp -v "${appimage}" "dist/${appimage_asset}"
 
           cd dist
           sha256sum * > "SHA256SUMS-${VERSION}.txt"
@@ -257,7 +293,7 @@ jobs:
           overwrite_files: true
 
       - name: Configure AUR SSH
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.update_aur == 'true'
+        if: github.event_name != 'workflow_dispatch' || (github.event.inputs.update_aur == 'true' && github.event.inputs.build_scope != 'appimage')
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
@@ -281,7 +317,7 @@ jobs:
           EOF
 
       - name: Update AUR package
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.update_aur == 'true'
+        if: github.event_name != 'workflow_dispatch' || (github.event.inputs.update_aur == 'true' && github.event.inputs.build_scope != 'appimage')
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
           TAG: ${{ needs.resolve.outputs.tag }}
