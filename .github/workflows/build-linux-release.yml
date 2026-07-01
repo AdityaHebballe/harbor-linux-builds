@@ -7,6 +7,11 @@ on:
         description: Upstream Harbor tag to build, for example v0.9.12. Leave empty for latest release.
         required: false
         type: string
+      update_aur:
+        description: Push updated PKGBUILD to AUR after a successful build.
+        required: false
+        type: boolean
+        default: true
   schedule:
     - cron: "17 */6 * * *"
 
@@ -111,6 +116,7 @@ jobs:
             libwebkit2gtk-4.1-dev \
             patchelf \
             pkg-config \
+            rpm \
             yt-dlp
 
       - name: Install Rust
@@ -166,6 +172,14 @@ jobs:
         working-directory: harbor
         run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles deb
 
+      - name: Build RPM bundle
+        working-directory: harbor
+        run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles rpm
+
+      - name: Build AppImage bundle
+        working-directory: harbor
+        run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles appimage
+
       - name: Validate Linux library ABI
         run: |
           set -euo pipefail
@@ -200,14 +214,30 @@ jobs:
             exit 1
           fi
 
-          asset="Harbor_${VERSION}_amd64.deb"
-          cp -v "${deb}" "dist/${asset}"
+          rpm="$(find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm -type f -name '*.rpm' | head -n 1)"
+          if [ -z "${rpm}" ]; then
+            echo "No RPM bundle was produced" >&2
+            exit 1
+          fi
+
+          appimage="$(find harbor/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage -type f -name '*.AppImage' | head -n 1)"
+          if [ -z "${appimage}" ]; then
+            echo "No AppImage bundle was produced" >&2
+            exit 1
+          fi
+
+          deb_asset="Harbor_${VERSION}_amd64.deb"
+          rpm_asset="Harbor-${VERSION}-1.x86_64.rpm"
+          appimage_asset="Harbor_${VERSION}_amd64.AppImage"
+          cp -v "${deb}" "dist/${deb_asset}"
+          cp -v "${rpm}" "dist/${rpm_asset}"
+          cp -v "${appimage}" "dist/${appimage_asset}"
 
           cd dist
           sha256sum * > "SHA256SUMS-${VERSION}.txt"
-          sha256="$(sha256sum "${asset}" | awk '{print $1}')"
-          echo "deb_asset=${asset}" >> "${GITHUB_OUTPUT}"
-          echo "deb_sha256=${sha256}" >> "${GITHUB_OUTPUT}"
+          deb_sha256="$(sha256sum "${deb_asset}" | awk '{print $1}')"
+          echo "deb_asset=${deb_asset}" >> "${GITHUB_OUTPUT}"
+          echo "deb_sha256=${deb_sha256}" >> "${GITHUB_OUTPUT}"
           ls -lh
 
       - name: Publish release
@@ -227,6 +257,7 @@ jobs:
           overwrite_files: true
 
       - name: Configure AUR SSH
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.update_aur == 'true'
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
@@ -250,6 +281,7 @@ jobs:
           EOF
 
       - name: Update AUR package
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.update_aur == 'true'
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
           TAG: ${{ needs.resolve.outputs.tag }}
