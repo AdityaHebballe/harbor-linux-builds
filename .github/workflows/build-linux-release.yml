@@ -15,11 +15,6 @@ on:
         options:
           - all
           - appimage
-      update_aur:
-        description: Push updated PKGBUILD to AUR after a successful build.
-        required: false
-        type: boolean
-        default: true
   schedule:
     - cron: "17 */6 * * *"
 
@@ -295,8 +290,37 @@ jobs:
           make_latest: true
           overwrite_files: true
 
+      - name: Verify published Debian asset
+        id: published_deb
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
+        env:
+          DEB_ASSET: ${{ steps.artifacts.outputs.deb_asset }}
+          EXPECTED_SHA256: ${{ steps.artifacts.outputs.deb_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "${tmpdir}"' EXIT
+          gh release download "${TAG}" \
+            --repo "${REPOSITORY}" \
+            --pattern "${DEB_ASSET}" \
+            --dir "${tmpdir}"
+
+          published_sha256="$(sha256sum "${tmpdir}/${DEB_ASSET}" | awk '{print $1}')"
+          if [ "${published_sha256}" != "${EXPECTED_SHA256}" ]; then
+            echo "Published Debian asset does not match the built artifact." >&2
+            echo "Expected:  ${EXPECTED_SHA256}" >&2
+            echo "Published: ${published_sha256}" >&2
+            exit 1
+          fi
+
+          echo "sha256=${published_sha256}" >> "${GITHUB_OUTPUT}"
+
       - name: Configure AUR SSH
-        if: github.event_name != 'workflow_dispatch' || (github.event.inputs.update_aur == 'true' && github.event.inputs.build_scope != 'appimage')
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
@@ -320,12 +344,12 @@ jobs:
           EOF
 
       - name: Update AUR package
-        if: github.event_name != 'workflow_dispatch' || (github.event.inputs.update_aur == 'true' && github.event.inputs.build_scope != 'appimage')
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
           TAG: ${{ needs.resolve.outputs.tag }}
           DEB_ASSET: ${{ steps.artifacts.outputs.deb_asset }}
-          DEB_SHA256: ${{ steps.artifacts.outputs.deb_sha256 }}
+          DEB_SHA256: ${{ steps.published_deb.outputs.sha256 }}
         run: |
           set -euo pipefail
 
