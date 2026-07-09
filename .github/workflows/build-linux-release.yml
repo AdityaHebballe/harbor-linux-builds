@@ -120,6 +120,7 @@ jobs:
             patchelf \
             pkg-config \
             rpm \
+            xz-utils \
             yt-dlp
 
       - name: Install Rust
@@ -163,26 +164,38 @@ jobs:
           fs.writeFileSync(workspacePath, workspace);
           EOF
 
-          mkdir -p src-tauri/binaries
-          ln -sf /usr/bin/ffmpeg src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
-          ln -sf /usr/bin/ffprobe src-tauri/binaries/ffprobe-x86_64-unknown-linux-gnu
-          ln -sf /usr/bin/yt-dlp src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu
-
       - name: Install JavaScript dependencies
         working-directory: harbor
         run: |
           pnpm install --lockfile-only --no-frozen-lockfile
           pnpm install --frozen-lockfile
 
+      - name: Fetch bundled build assets
+        working-directory: harbor
+        run: |
+          set -euo pipefail
+
+          if node -e "process.exit(require('./package.json').scripts?.setup ? 0 : 1)"; then
+            pnpm run setup
+          else
+            if node -e "process.exit(require('./package.json').scripts?.['setup:fonts'] ? 0 : 1)"; then
+              pnpm run setup:fonts
+            fi
+            mkdir -p src-tauri/binaries
+            ln -sf /usr/bin/ffmpeg src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
+            ln -sf /usr/bin/ffprobe src-tauri/binaries/ffprobe-x86_64-unknown-linux-gnu
+            ln -sf /usr/bin/yt-dlp src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu
+          fi
+
       - name: Build Debian bundle
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
         working-directory: harbor
-        run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles deb
+        run: pnpm tauri:build:linux-system -- --target x86_64-unknown-linux-gnu --bundles deb
 
       - name: Build RPM bundle
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
         working-directory: harbor
-        run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles rpm
+        run: pnpm tauri:build:linux-system -- --target x86_64-unknown-linux-gnu --bundles rpm
 
       - name: Build AppImage bundle
         working-directory: harbor
