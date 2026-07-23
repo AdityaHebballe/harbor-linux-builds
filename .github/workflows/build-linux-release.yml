@@ -26,6 +26,18 @@ on:
         description: Upstream Harbor tag to build, for example v0.9.12. Leave empty for latest release.
         required: false
         type: string
+      source_repo:
+        description: Where to check out Harbor source from.
+        required: false
+        default: upstream
+        type: choice
+        options:
+          - upstream
+          - fork
+      source_ref:
+        description: Branch or commit to build when source_repo is "fork" (e.g. fix/v0.9.21-build). Ignored when source_repo is "upstream".
+        required: false
+        type: string
   schedule:
     - cron: "17 */6 * * *"
 
@@ -44,6 +56,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
       source_ref: ${{ steps.resolve.outputs.source_ref }}
+      source_repo: ${{ steps.resolve.outputs.source_repo }}
       channel: ${{ steps.resolve.outputs.channel }}
       aur_package: ${{ steps.resolve.outputs.aur_package }}
       contains_linux_fix: ${{ steps.resolve.outputs.contains_linux_fix }}
@@ -53,32 +66,52 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_SOURCE_REPO: ${{ inputs.source_repo }}
           INPUT_CHANNEL: ${{ inputs.channel || 'stable' }}
         run: |
           set -euo pipefail
 
-          if [ -n "${INPUT_SOURCE_REF}" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_call" ]; then
+            # Invoked from another workflow (e.g. the beta build), always upstream.
             tag="${INPUT_TAG}"
             version="${INPUT_VERSION}"
             source_ref="${INPUT_SOURCE_REF}"
+            source_repo="harborstremio/harbor"
             contains_linux_fix=true
-          elif [ -n "${INPUT_TAG}" ]; then
+          elif [ "${INPUT_SOURCE_REPO}" = "fork" ]; then
+            # Manual dispatch, temporarily building from a fork branch/commit
+            # instead of upstream (e.g. while an upstream build fix is pending).
+            if [ -z "${INPUT_SOURCE_REF}" ]; then
+              echo "source_ref is required when source_repo is 'fork'" >&2
+              exit 1
+            fi
+            if [ -z "${INPUT_TAG}" ]; then
+              echo "tag is required when source_repo is 'fork'" >&2
+              exit 1
+            fi
             tag="${INPUT_TAG}"
-            source_ref="${tag}"
+            source_ref="${INPUT_SOURCE_REF}"
+            source_repo="AdityaHebballe/harbor"
+            version="${tag#v}"
+            contains_linux_fix=true
           else
-            tag="$(gh api repos/harborstremio/harbor/releases/latest --jq '.tag_name')"
+            source_repo="harborstremio/harbor"
+            if [ -n "${INPUT_TAG}" ]; then
+              tag="${INPUT_TAG}"
+            else
+              tag="$(gh api repos/harborstremio/harbor/releases/latest --jq '.tag_name')"
+            fi
             source_ref="${tag}"
-          fi
 
-          if [ -z "${tag}" ] || [ "${tag}" = "null" ]; then
-            echo "Could not resolve upstream tag" >&2
-            exit 1
-          fi
+            if [ -z "${tag}" ] || [ "${tag}" = "null" ]; then
+              echo "Could not resolve upstream tag" >&2
+              exit 1
+            fi
 
-          if [ -z "${INPUT_SOURCE_REF}" ]; then
             version="${tag#v}"
             tag_commit="$(gh api "repos/harborstremio/harbor/git/ref/tags/${tag}" --jq '.object.sha')"
             compare_status="$(gh api "repos/harborstremio/harbor/compare/7eaf9d4...${tag_commit}" --jq '.status')"
@@ -106,6 +139,7 @@ jobs:
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
+          echo "source_repo=${source_repo}" >> "${GITHUB_OUTPUT}"
           echo "channel=${INPUT_CHANNEL}" >> "${GITHUB_OUTPUT}"
           echo "aur_package=${aur_package}" >> "${GITHUB_OUTPUT}"
           echo "contains_linux_fix=${contains_linux_fix}" >> "${GITHUB_OUTPUT}"
@@ -141,7 +175,7 @@ jobs:
       - name: Checkout Harbor
         uses: actions/checkout@v7.0.0
         with:
-          repository: harborstremio/harbor
+          repository: ${{ needs.resolve.outputs.source_repo }}
           ref: ${{ needs.resolve.outputs.source_ref }}
           path: harbor
 
@@ -314,7 +348,7 @@ jobs:
           body: |
             Unofficial ${{ needs.resolve.outputs.channel }} Linux build of Harbor.
 
-            Source: https://github.com/harborstremio/harbor/tree/${{ needs.resolve.outputs.source_ref }}
+            Source: https://github.com/${{ needs.resolve.outputs.source_repo }}/tree/${{ needs.resolve.outputs.source_ref }}
 
             These binaries are built by this repository's GitHub Actions workflow, not by upstream Harbor.
           files: dist/*
@@ -352,6 +386,7 @@ jobs:
           echo "sha256=${published_sha256}" >> "${GITHUB_OUTPUT}"
 
       - name: Configure AUR SSH
+        if: needs.resolve.outputs.source_repo == 'harborstremio/harbor'
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
@@ -375,6 +410,7 @@ jobs:
           EOF
 
       - name: Update AUR package
+        if: needs.resolve.outputs.source_repo == 'harborstremio/harbor'
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
           TAG: ${{ needs.resolve.outputs.tag }}
@@ -493,7 +529,10 @@ jobs:
   flatpak:
     name: Build Flatpak bundle
     needs: [resolve, build]
-    if: needs.resolve.outputs.contains_linux_fix == 'true' && needs.resolve.outputs.should_build == 'true'
+    # build-flatpak.yml always checks out harborstremio/harbor directly, so skip
+    # it for temporary fork-sourced builds (deb/rpm from the resolve/build jobs
+    # above are still produced and published).
+    if: needs.resolve.outputs.contains_linux_fix == 'true' && needs.resolve.outputs.should_build == 'true' && needs.resolve.outputs.source_repo == 'harborstremio/harbor'
     uses: ./.github/workflows/build-flatpak.yml
     with:
       source_ref: ${{ needs.resolve.outputs.source_ref }}
