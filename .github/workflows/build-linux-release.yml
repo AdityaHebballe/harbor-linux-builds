@@ -255,12 +255,12 @@ jobs:
       - name: Build Debian bundle
         if: inputs.build_scope != 'appimage'
         working-directory: harbor
-        run: pnpm tauri:build:linux-system -- --target x86_64-unknown-linux-gnu --bundles deb
+        run: pnpm tauri build --config src-tauri/tauri.linux-system.conf.json --target x86_64-unknown-linux-gnu --bundles deb
 
       - name: Build RPM bundle
         if: inputs.build_scope != 'appimage'
         working-directory: harbor
-        run: pnpm tauri:build:linux-system -- --target x86_64-unknown-linux-gnu --bundles rpm
+        run: pnpm tauri build --config src-tauri/tauri.linux-system.conf.json --target x86_64-unknown-linux-gnu --bundles rpm
 
       - name: Build AppImage bundle
         working-directory: harbor
