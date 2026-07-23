@@ -15,6 +15,11 @@ on:
         description: Harbor package version.
         required: false
         type: string
+      channel:
+        description: Flatpak branch to build.
+        required: false
+        default: stable
+        type: string
   workflow_dispatch:
     inputs:
       source_ref:
@@ -29,12 +34,20 @@ on:
         description: Harbor package version. Leave blank to read it from the source ref.
         required: false
         type: string
+      channel:
+        description: Flatpak branch to build.
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
 
 permissions:
   contents: write
 
 concurrency:
-  group: harbor-flatpak-${{ inputs.tag }}
+  group: harbor-flatpak-sources
   cancel-in-progress: false
 
 jobs:
@@ -51,6 +64,19 @@ jobs:
           set -euo pipefail
           gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null
 
+      - name: Validate Flatpak channel
+        env:
+          CHANNEL: ${{ inputs.channel || 'stable' }}
+        run: |
+          set -euo pipefail
+          case "${CHANNEL}" in
+            stable|beta) ;;
+            *)
+              echo "Unsupported Flatpak channel: ${CHANNEL}" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Resolve upstream source ref
         id: source
         env:
@@ -61,12 +87,23 @@ jobs:
           source_ref="$(gh api "repos/harborstremio/harbor/commits/${INPUT_SOURCE_REF}" --jq '.sha')"
           echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
 
+      - name: Checkout downstream Flatpak configuration
+        uses: actions/checkout@v7.0.0
+        with:
+          ref: main
+          path: packaging
+
       - name: Checkout Harbor
         uses: actions/checkout@v7.0.0
         with:
           repository: harborstremio/harbor
           ref: ${{ steps.source.outputs.source_ref }}
           path: harbor
+
+      - name: Overlay downstream Flatpak configuration
+        run: |
+          set -euo pipefail
+          rsync -a --delete packaging/flatpak/ harbor/flatpak/
 
       - name: Resolve package version
         id: package
@@ -85,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils ostree
+          sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils ostree python3-venv
 
       - name: Configure Flathub runtimes
         run: |
@@ -96,6 +133,33 @@ jobs:
             org.gnome.Sdk//49 \
             org.freedesktop.Sdk.Extension.rust-stable//25.08 \
             org.freedesktop.Sdk.Extension.node22//25.08
+
+      - name: Refresh downstream Flatpak sources
+        working-directory: harbor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          release_date="$(gh release view "${TAG}" --repo "${REPOSITORY}" --json publishedAt --jq '.publishedAt' | cut -dT -f1)"
+          RELEASE_DATE="${release_date}" bash flatpak/update-flatpak.sh
+          printf '%s\n' '${{ steps.source.outputs.source_ref }}' > flatpak/source-ref.txt
+
+      - name: Persist downstream Flatpak sources
+        working-directory: packaging
+        run: |
+          set -euo pipefail
+          rsync -a --delete ../harbor/flatpak/ flatpak/
+          git add flatpak
+          if git diff --cached --quiet; then
+            echo "Downstream Flatpak sources are already current."
+            exit 0
+          fi
+          git config user.name "Aditya Hebballe"
+          git config user.email "45328110+AdityaHebballe@users.noreply.github.com"
+          git commit -m "build(flatpak): sync ${{ steps.package.outputs.version }}"
+          git push origin HEAD:main
 
       - name: Validate Flatpak metadata
         working-directory: harbor
@@ -131,13 +195,14 @@ jobs:
       - name: Build Flatpak bundle
         working-directory: harbor
         env:
+          CHANNEL: ${{ inputs.channel || 'stable' }}
           VERSION: ${{ steps.package.outputs.version }}
         run: |
           set -euo pipefail
-          flatpak-builder --user --force-clean --repo=/tmp/harbor-flatpak-repo /tmp/harbor-flatpak-build flatpak/site.harbor.Harbor.yml
+          flatpak-builder --user --force-clean --default-branch="${CHANNEL}" --repo=/tmp/harbor-flatpak-repo /tmp/harbor-flatpak-build flatpak/site.harbor.Harbor.yml
           flatpak build-bundle /tmp/harbor-flatpak-repo \
             "../Harbor_${VERSION}_x86_64.flatpak" \
-            site.harbor.Harbor
+            site.harbor.Harbor "${CHANNEL}"
 
       - name: Validate Flatpak bundle
         env:

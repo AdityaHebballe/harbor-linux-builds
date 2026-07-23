@@ -499,3 +499,4 @@ jobs:
       source_ref: ${{ needs.resolve.outputs.source_ref }}
       tag: ${{ needs.resolve.outputs.tag }}
       version: ${{ needs.resolve.outputs.version }}
+      channel: ${{ needs.resolve.outputs.channel }}
