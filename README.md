@@ -27,6 +27,9 @@ already has a release for that tag.
 `beta-branch` (or a supplied beta commit). It creates a release tagged as
 `beta-v<version>-<commit>` and updates the AUR package
 [`harbor-stremio-beta-bin`](https://aur.archlinux.org/packages/harbor-stremio-beta-bin).
+Beta builds are GitHub pre-releases, so the stable release remains the
+repository's single GitHub `Latest` release while the newest pre-release is the
+latest beta build.
 
 The beta package conflicts with `harbor-stremio-bin`: both contain the same
 Harbor executable and desktop integration, so they cannot be installed side by

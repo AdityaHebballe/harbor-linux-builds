@@ -357,6 +357,7 @@ jobs:
           files: dist/*
           fail_on_unmatched_files: true
           make_latest: ${{ needs.resolve.outputs.channel == 'stable' }}
+          prerelease: ${{ needs.resolve.outputs.channel == 'beta' }}
           overwrite_files: true
 
       - name: Verify published Debian asset
