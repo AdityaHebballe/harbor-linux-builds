@@ -507,7 +507,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils
+          sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils ostree
 
       - name: Configure Flathub runtimes
         run: |
@@ -517,13 +517,13 @@ jobs:
             org.gnome.Platform//49 \
             org.gnome.Sdk//49 \
             org.freedesktop.Sdk.Extension.rust-stable//25.08 \
-            org.freedesktop.Sdk.Extension.node22//25.08 \
-            org.freedesktop.Sdk.Extension.ffmpeg-full//25.08
+            org.freedesktop.Sdk.Extension.node22//25.08
 
       - name: Validate Flatpak metadata
         working-directory: harbor
         run: |
           set -euo pipefail
+          flatpak/update-flatpak.sh --check
           desktop-file-validate flatpak/site.harbor.Harbor.desktop
           appstreamcli validate --no-net flatpak/site.harbor.Harbor.metainfo.xml
           flatpak-builder --show-manifest flatpak/site.harbor.Harbor.yml >/dev/null

@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: harbor-linux-beta-${{ inputs.ref }}
+  group: harbor-linux-beta-${{ inputs.ref || 'beta-branch' }}
   cancel-in-progress: false
 
 jobs:
@@ -31,7 +31,7 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          INPUT_REF: ${{ inputs.ref }}
+          INPUT_REF: ${{ inputs.ref || 'beta-branch' }}
         run: |
           set -euo pipefail
 
@@ -64,3 +64,56 @@ jobs:
       version: ${{ needs.resolve.outputs.version }}
       channel: beta
     secrets: inherit
+
+  update-readme:
+    name: Update beta download link
+    needs: [resolve, build]
+    if: always() && needs.resolve.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout build repository
+        uses: actions/checkout@v7.0.0
+        with:
+          ref: main
+
+      - name: Update beta release links
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if ! gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null 2>&1; then
+            echo "No beta release was published; README unchanged."
+            exit 0
+          fi
+
+          node <<'EOF'
+          const fs = require("node:fs");
+
+          const readmePath = "README.md";
+          const releaseUrl = `https://github.com/${process.env.REPOSITORY}/releases/tag/${process.env.TAG}`;
+          const readme = fs.readFileSync(readmePath, "utf8");
+          const updatedReadme = readme.replace(
+            /https:\/\/github\.com\/AdityaHebballe\/harbor-linux-builds\/releases\/tag\/beta-v[^)"\s<]+/g,
+            releaseUrl,
+          );
+
+          if (updatedReadme === readme) {
+            throw new Error("No beta release links found in README.md");
+          }
+
+          fs.writeFileSync(readmePath, updatedReadme);
+          EOF
+
+          if git diff --quiet -- README.md; then
+            echo "README beta link is already current."
+            exit 0
+          fi
+
+          git config user.name "Aditya Hebballe"
+          git config user.email "45328110+AdityaHebballe@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: update beta release link"
+          git push origin HEAD:main
