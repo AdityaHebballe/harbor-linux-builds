@@ -1,0 +1,148 @@
+name: Build Harbor Flatpak
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Harbor commit or ref to build.
+        required: true
+        type: string
+      tag:
+        description: Existing release tag to receive the Flatpak bundle.
+        required: true
+        type: string
+      version:
+        description: Harbor package version.
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Upstream Harbor commit or ref to build.
+        required: true
+        type: string
+      tag:
+        description: Existing release tag to receive the Flatpak bundle.
+        required: true
+        type: string
+      version:
+        description: Harbor package version. Leave blank to read it from the source ref.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: harbor-flatpak-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and attach Flatpak bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null
+
+      - name: Checkout Harbor
+        uses: actions/checkout@v7.0.0
+        with:
+          repository: harborstremio/harbor
+          ref: ${{ inputs.source_ref }}
+          path: harbor
+
+      - name: Resolve package version
+        id: package
+        working-directory: harbor
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION}"
+          if [ -z "${version}" ]; then
+            version="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install Flatpak tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils ostree
+
+      - name: Configure Flathub runtimes
+        run: |
+          set -euo pipefail
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub \
+            org.gnome.Platform//49 \
+            org.gnome.Sdk//49 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08 \
+            org.freedesktop.Sdk.Extension.node22//25.08
+
+      - name: Validate Flatpak metadata
+        working-directory: harbor
+        run: |
+          set -euo pipefail
+          flatpak/update-flatpak.sh --check
+          desktop-file-validate flatpak/site.harbor.Harbor.desktop
+          appstreamcli validate --no-net flatpak/site.harbor.Harbor.metainfo.xml
+          flatpak-builder --show-manifest flatpak/site.harbor.Harbor.yml >/dev/null
+
+      - name: Prepare Flatpak source
+        working-directory: harbor
+        run: |
+          set -euo pipefail
+
+          node <<'EOF'
+          const fs = require('fs');
+          const workspacePath = 'pnpm-workspace.yaml';
+          let workspace = fs.readFileSync(workspacePath, 'utf8');
+          const setAllowBuild = (name, value) => {
+            const entry = new RegExp(`^(\\s*)${name}:.*$`, 'm');
+            if (entry.test(workspace)) {
+              workspace = workspace.replace(entry, `$1${name}: ${value}`);
+              return;
+            }
+            workspace = workspace.replace(/^allowBuilds:\s*$/m, `allowBuilds:\n  ${name}: ${value}`);
+          };
+          setAllowBuild('esbuild', 'true');
+          setAllowBuild('protobufjs', 'false');
+          fs.writeFileSync(workspacePath, workspace);
+          EOF
+
+      - name: Build Flatpak bundle
+        working-directory: harbor
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          flatpak-builder --user --force-clean --repo=/tmp/harbor-flatpak-repo /tmp/harbor-flatpak-build flatpak/site.harbor.Harbor.yml
+          flatpak build-bundle /tmp/harbor-flatpak-repo \
+            "../Harbor_${VERSION}_x86_64.flatpak" \
+            site.harbor.Harbor
+
+      - name: Validate Flatpak bundle
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          ostree init --repo=/tmp/harbor-flatpak-validation-repo --mode=archive-z2
+          flatpak build-import-bundle --update-appstream --no-update-summary \
+            /tmp/harbor-flatpak-validation-repo \
+            "Harbor_${VERSION}_x86_64.flatpak"
+
+      - name: Attach Flatpak bundle to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+          ASSET: Harbor_${{ steps.package.outputs.version }}_x86_64.flatpak
+        run: gh release upload "${TAG}" "${ASSET}" --repo "${REPOSITORY}" --clobber
