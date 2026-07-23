@@ -1,48 +1,82 @@
-# Harbor Linux Builds
+# Harbor for Linux
 
-Unofficial Linux release builds for [Harbor](https://github.com/harborstremio/harbor).
+Unofficial Linux builds of [Harbor](https://github.com/harborstremio/harbor), built from its upstream source tags by GitHub Actions.
 
-This repository exists so Arch/AUR packaging can consume stable Linux binary
-artifacts while upstream does not attach Linux bundles to GitHub Releases.
+<p align="center">
+  <a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Download stable</strong></a>
+  ·
+  <a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases"><strong>Browse beta builds</strong></a>
+  ·
+  <a href="https://github.com/harborstremio/harbor"><strong>Harbor upstream</strong></a>
+</p>
 
-The workflow builds Harbor from the exact upstream tag, then publishes the Linux
-bundle files to this repository's matching release tag.
+> **x86_64 only.** Choose the package that fits your distribution below. Every stable download is on the [latest release](https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest).
 
-## Usage
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Arch Linux</h3>
+      <p>Install from the AUR. Updates arrive through your usual AUR helper.</p>
+      <p><a href="https://aur.archlinux.org/packages/harbor-stremio-bin"><strong>Open harbor-stremio-bin on AUR →</strong></a></p>
+      <pre><code>paru -S harbor-stremio-bin</code></pre>
+      <p><sub>Replace <code>paru</code> with <code>yay</code> if that is your helper.</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Debian, Ubuntu &amp; Mint</h3>
+      <p><a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Download the latest .deb →</strong></a></p>
+      <pre><code>cd ~/Downloads
+sudo apt install ./Harbor_*.deb</code></pre>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Fedora &amp; openSUSE</h3>
+      <p><a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Download the latest .rpm →</strong></a></p>
+      <pre><code># Fedora
+sudo dnf install ./Harbor-*.rpm
 
-Run the `Build Harbor Linux Release` workflow manually with a tag such as:
+# openSUSE
+sudo zypper install ./Harbor-*.rpm</code></pre>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Any desktop Linux</h3>
+      <p><a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Download the latest AppImage →</strong></a></p>
+      <pre><code>cd ~/Downloads
+chmod +x Harbor_*.AppImage
+./Harbor_*.AppImage</code></pre>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Flatpak</h3>
+      <p><a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Download the latest .flatpak →</strong></a></p>
+      <pre><code>cd ~/Downloads
+flatpak install --user ./Harbor_*.flatpak</code></pre>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Verify a download</h3>
+      <p>Each release includes a SHA-256 checksum file for the core package assets.</p>
+      <p><a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Get SHA256SUMS →</strong></a></p>
+      <pre><code>sha256sum -c SHA256SUMS-*.txt</code></pre>
+    </td>
+  </tr>
+</table>
 
-```text
-v0.9.12
+## Beta channel
+
+Beta packages follow Harbor's `beta-branch` and are published as GitHub pre-releases every five hours when that branch changes.
+
+- [Browse beta downloads](https://github.com/AdityaHebballe/harbor-linux-builds/releases)
+- Arch Linux: [`harbor-stremio-beta-bin`](https://aur.archlinux.org/packages/harbor-stremio-beta-bin)
+
+```bash
+paru -S harbor-stremio-beta-bin
 ```
 
-If no tag is provided, the workflow uses the latest upstream Harbor release.
+The stable and beta AUR packages conflict: they install the same Harbor application, so install one channel at a time.
 
-The scheduled run checks for a new upstream release and exits if this repository
-already has a release for that tag.
+## How it works
 
-Stable releases include Debian, RPM, AppImage, and Flatpak bundle artifacts.
-The Flatpak build is separate from the core release/AUR job, so a Flatpak-only
-failure does not prevent the other three formats from publishing.
+Stable releases track upstream Harbor release tags. Beta releases track an exact commit from `beta-branch`. New releases provide `.deb`, `.rpm`, AppImage, and Flatpak bundles; Flatpak is built separately so its failure never blocks the other packages or the AUR update.
 
-## Beta builds
-
-`Build Harbor Linux Beta` is a separate manual workflow for upstream
-`beta-branch` (or a supplied beta commit). It creates a release tagged as
-`beta-v<version>-<commit>` and updates the AUR package
-[`harbor-stremio-beta-bin`](https://aur.archlinux.org/packages/harbor-stremio-beta-bin).
-Beta builds are GitHub pre-releases, so the stable release remains the
-repository's single GitHub `Latest` release while the newest pre-release is the
-latest beta build.
-
-The beta package conflicts with `harbor-stremio-bin`: both contain the same
-Harbor executable and desktop integration, so they cannot be installed side by
-side. It runs every five hours and compares the current beta commit with the
-commit encoded in an existing beta release tag. If that exact commit was
-already published, it exits without rebuilding. Beta releases use the same
-four artifact formats and the same non-blocking Flatpak job.
-
-## Trust Model
-
-These binaries are not official Harbor upstream binaries. They are built by this
-repository's GitHub Actions workflow from upstream Harbor release tags.
+These are community-maintained builds, not binaries published by the upstream Harbor project. The workflow and exact upstream source ref for each build are visible in the [Actions tab](https://github.com/AdityaHebballe/harbor-linux-builds/actions).
