@@ -1,0 +1,73 @@
+name: Build Harbor Linux Beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Upstream beta ref or commit to build.
+        required: true
+        default: beta-branch
+        type: string
+      build_scope:
+        description: Build all Linux release formats or only rebuild the AppImage.
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - appimage
+
+permissions:
+  contents: write
+
+concurrency:
+  group: harbor-linux-beta-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve upstream beta commit
+    runs-on: ubuntu-24.04
+    outputs:
+      source_ref: ${{ steps.resolve.outputs.source_ref }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve beta commit and version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+
+          source_ref="$(gh api "repos/harborstremio/harbor/commits/${INPUT_REF}" --jq '.sha')"
+          version="$(gh api "repos/harborstremio/harbor/contents/package.json?ref=${source_ref}" --jq '.content' | tr -d '\n' | base64 --decode | jq -r '.version')"
+          compare_status="$(gh api "repos/harborstremio/harbor/compare/7eaf9d4...${source_ref}" --jq '.status')"
+
+          if ! echo "${compare_status}" | grep -Eq '^(identical|ahead)$'; then
+            echo "${INPUT_REF} does not contain Linux build fix 7eaf9d4." >&2
+            exit 1
+          fi
+
+          if [ -z "${version}" ] || [ "${version}" = "null" ]; then
+            echo "Could not read the Harbor version from ${source_ref}." >&2
+            exit 1
+          fi
+
+          short_sha="${source_ref:0:12}"
+          echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
+          echo "tag=beta-v${version}-${short_sha}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build beta Linux bundles
+    needs: resolve
+    uses: ./.github/workflows/build-linux-release.yml
+    with:
+      source_ref: ${{ needs.resolve.outputs.source_ref }}
+      tag: ${{ needs.resolve.outputs.tag }}
+      version: ${{ needs.resolve.outputs.version }}
+      channel: beta
+      build_scope: ${{ inputs.build_scope }}
+    secrets: inherit

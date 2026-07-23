@@ -1,6 +1,30 @@
 name: Build Harbor Linux Release
 
 on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Harbor commit or ref to build.
+        required: true
+        type: string
+      tag:
+        description: Release tag to create in this repository.
+        required: true
+        type: string
+      version:
+        description: Harbor package version.
+        required: true
+        type: string
+      channel:
+        description: Package channel.
+        required: false
+        default: stable
+        type: string
+      build_scope:
+        description: Build all Linux release formats or only rebuild the AppImage.
+        required: false
+        default: all
+        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -22,7 +46,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: harbor-linux-${{ github.event.inputs.tag || 'latest' }}
+  group: harbor-linux-${{ inputs.tag || 'latest' }}
   cancel-in-progress: false
 
 jobs:
@@ -32,6 +56,9 @@ jobs:
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
+      source_ref: ${{ steps.resolve.outputs.source_ref }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      aur_package: ${{ steps.resolve.outputs.aur_package }}
       contains_linux_fix: ${{ steps.resolve.outputs.contains_linux_fix }}
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
@@ -39,14 +66,24 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_CHANNEL: ${{ inputs.channel || 'stable' }}
         run: |
           set -euo pipefail
 
-          if [ -n "${INPUT_TAG}" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_call" ]; then
             tag="${INPUT_TAG}"
+            version="${INPUT_VERSION}"
+            source_ref="${INPUT_SOURCE_REF}"
+            contains_linux_fix=true
+          elif [ -n "${INPUT_TAG}" ]; then
+            tag="${INPUT_TAG}"
+            source_ref="${tag}"
           else
             tag="$(gh api repos/harborstremio/harbor/releases/latest --jq '.tag_name')"
+            source_ref="${tag}"
           fi
 
           if [ -z "${tag}" ] || [ "${tag}" = "null" ]; then
@@ -54,18 +91,37 @@ jobs:
             exit 1
           fi
 
-          version="${tag#v}"
-          tag_commit="$(gh api "repos/harborstremio/harbor/git/ref/tags/${tag}" --jq '.object.sha')"
-          compare_status="$(gh api "repos/harborstremio/harbor/compare/7eaf9d4...${tag_commit}" --jq '.status')"
+          if [ "${GITHUB_EVENT_NAME}" != "workflow_call" ]; then
+            version="${tag#v}"
+            tag_commit="$(gh api "repos/harborstremio/harbor/git/ref/tags/${tag}" --jq '.object.sha')"
+            compare_status="$(gh api "repos/harborstremio/harbor/compare/7eaf9d4...${tag_commit}" --jq '.status')"
+            if echo "${compare_status}" | grep -Eq '^(identical|ahead)$'; then
+              contains_linux_fix=true
+            else
+              echo "Upstream tag ${tag} does not contain Linux build fix 7eaf9d4; skipping."
+              contains_linux_fix=false
+            fi
+          fi
+
+          case "${INPUT_CHANNEL}" in
+            stable)
+              aur_package=harbor-stremio-bin
+              ;;
+            beta)
+              aur_package=harbor-stremio-beta-bin
+              ;;
+            *)
+              echo "Unsupported package channel: ${INPUT_CHANNEL}" >&2
+              exit 1
+              ;;
+          esac
 
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          if echo "${compare_status}" | grep -Eq '^(identical|ahead)$'; then
-            echo "contains_linux_fix=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "Upstream tag ${tag} does not contain Linux build fix 7eaf9d4; skipping."
-            echo "contains_linux_fix=false" >> "${GITHUB_OUTPUT}"
-          fi
+          echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
+          echo "channel=${INPUT_CHANNEL}" >> "${GITHUB_OUTPUT}"
+          echo "aur_package=${aur_package}" >> "${GITHUB_OUTPUT}"
+          echo "contains_linux_fix=${contains_linux_fix}" >> "${GITHUB_OUTPUT}"
 
       - name: Check existing release
         id: check
@@ -99,7 +155,7 @@ jobs:
         uses: actions/checkout@v7.0.0
         with:
           repository: harborstremio/harbor
-          ref: ${{ needs.resolve.outputs.tag }}
+          ref: ${{ needs.resolve.outputs.source_ref }}
           path: harbor
 
       - name: Install Linux dependencies
@@ -188,12 +244,12 @@ jobs:
           fi
 
       - name: Build Debian bundle
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
+        if: inputs.build_scope != 'appimage'
         working-directory: harbor
         run: pnpm tauri:build:linux-system -- --target x86_64-unknown-linux-gnu --bundles deb
 
       - name: Build RPM bundle
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
+        if: inputs.build_scope != 'appimage'
         working-directory: harbor
         run: pnpm tauri:build:linux-system -- --target x86_64-unknown-linux-gnu --bundles rpm
 
@@ -204,7 +260,7 @@ jobs:
         run: pnpm tauri build --target x86_64-unknown-linux-gnu --bundles appimage
 
       - name: Validate Linux library ABI
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
+        if: inputs.build_scope != 'appimage'
         run: |
           set -euo pipefail
 
@@ -227,7 +283,7 @@ jobs:
       - name: Collect artifacts
         id: artifacts
         env:
-          BUILD_SCOPE: ${{ github.event.inputs.build_scope || 'all' }}
+          BUILD_SCOPE: ${{ inputs.build_scope || 'all' }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
@@ -293,19 +349,19 @@ jobs:
           tag_name: ${{ needs.resolve.outputs.tag }}
           name: Harbor Linux ${{ needs.resolve.outputs.tag }}
           body: |
-            Unofficial Linux build of Harbor from upstream tag `${{ needs.resolve.outputs.tag }}`.
+            Unofficial ${{ needs.resolve.outputs.channel }} Linux build of Harbor.
 
-            Source: https://github.com/harborstremio/harbor/tree/${{ needs.resolve.outputs.tag }}
+            Source: https://github.com/harborstremio/harbor/tree/${{ needs.resolve.outputs.source_ref }}
 
             These binaries are built by this repository's GitHub Actions workflow, not by upstream Harbor.
           files: dist/*
           fail_on_unmatched_files: true
-          make_latest: true
+          make_latest: ${{ needs.resolve.outputs.channel == 'stable' }}
           overwrite_files: true
 
       - name: Verify published Debian asset
         id: published_deb
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
+        if: inputs.build_scope != 'appimage'
         env:
           DEB_ASSET: ${{ steps.artifacts.outputs.deb_asset }}
           EXPECTED_SHA256: ${{ steps.artifacts.outputs.deb_sha256 }}
@@ -333,7 +389,7 @@ jobs:
           echo "sha256=${published_sha256}" >> "${GITHUB_OUTPUT}"
 
       - name: Configure AUR SSH
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
+        if: inputs.build_scope != 'appimage'
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
@@ -357,17 +413,29 @@ jobs:
           EOF
 
       - name: Update AUR package
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope != 'appimage'
+        if: inputs.build_scope != 'appimage'
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
           TAG: ${{ needs.resolve.outputs.tag }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          AUR_PACKAGE: ${{ needs.resolve.outputs.aur_package }}
           DEB_ASSET: ${{ steps.artifacts.outputs.deb_asset }}
           DEB_SHA256: ${{ steps.published_deb.outputs.sha256 }}
         run: |
           set -euo pipefail
 
           tmpdir="$(mktemp -d)"
-          git clone ssh://aur@aur.archlinux.org/harbor-stremio-bin.git "${tmpdir}"
+          git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" "${tmpdir}"
+
+          if [ "${CHANNEL}" = "beta" ]; then
+            package_desc='A Stremio client built for adventure (beta binary release)'
+            package_provides="provides=('harbor-stremio-beta' 'harbor')"
+            package_conflicts="conflicts=('harbor-stremio-bin' 'harbor-stremio' 'harbor' 'harbor-stremio-git')"
+          else
+            package_desc='A Stremio client built for adventure (binary release)'
+            package_provides="provides=('harbor-stremio' 'harbor')"
+            package_conflicts="conflicts=('harbor-stremio' 'harbor' 'harbor-stremio-git')"
+          fi
 
           pkgrel=1
           if [ -f "${tmpdir}/PKGBUILD" ]; then
@@ -381,11 +449,11 @@ jobs:
           cat > "${tmpdir}/PKGBUILD" <<EOF
           # Maintainer: Aditya Hebballe <adityahebballe@proton.me>
 
-          pkgname=harbor-stremio-bin
+          pkgname=${AUR_PACKAGE}
           _pkgname=harbor
           pkgver=${VERSION}
           pkgrel=${pkgrel}
-          pkgdesc='A Stremio client built for adventure (binary release)'
+          pkgdesc='${package_desc}'
           arch=('x86_64')
           url='https://github.com/harborstremio/harbor'
           license=('MIT')
@@ -404,10 +472,10 @@ jobs:
 
           makedepends=('libarchive')
 
-          provides=('harbor-stremio' 'harbor')
-          conflicts=('harbor-stremio' 'harbor' 'harbor-stremio-git')
+          ${package_provides}
+          ${package_conflicts}
 
-          source=("Harbor_\${pkgver}-\${pkgrel}_amd64.deb::https://github.com/AdityaHebballe/harbor-linux-builds/releases/download/v\${pkgver}/${DEB_ASSET}")
+          source=("Harbor_\${pkgver}-\${pkgrel}_amd64.deb::https://github.com/AdityaHebballe/harbor-linux-builds/releases/download/${TAG}/${DEB_ASSET}")
           sha256sums=('${DEB_SHA256}')
 
           package() {
