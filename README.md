@@ -42,10 +42,6 @@ commit encoded in an existing beta release tag. If that exact commit was
 already published, it exits without rebuilding. Beta releases use the same
 four artifact formats and the same non-blocking Flatpak job.
 
-The beta builder also applies narrowly scoped compatibility fixes for upstream
-beta metadata when needed, including its current missing face-asset fetch
-script. The models themselves are already committed in that branch.
-
 ## Trust Model
 
 These binaries are not official Harbor upstream binaries. They are built by this

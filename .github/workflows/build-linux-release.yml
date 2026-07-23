@@ -227,18 +227,6 @@ jobs:
           setAllowBuild('esbuild', 'true');
           setAllowBuild('protobufjs', 'false');
           fs.writeFileSync(workspacePath, workspace);
-
-          const packagePath = 'package.json';
-          const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-          const faceAssetScript = 'scripts/fetch-face-assets.mjs';
-          if (
-            packageJson.scripts?.prebuild === `node ${faceAssetScript}` &&
-            !fs.existsSync(faceAssetScript)
-          ) {
-            // beta 0.9.112 already ships these assets, but references an absent fetch script.
-            delete packageJson.scripts.prebuild;
-            fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
-          }
           EOF
 
       - name: Install JavaScript dependencies
@@ -609,17 +597,6 @@ jobs:
           setAllowBuild('esbuild', 'true');
           setAllowBuild('protobufjs', 'false');
           fs.writeFileSync(workspacePath, workspace);
-
-          const packagePath = 'package.json';
-          const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-          const faceAssetScript = 'scripts/fetch-face-assets.mjs';
-          if (
-            packageJson.scripts?.prebuild === `node ${faceAssetScript}` &&
-            !fs.existsSync(faceAssetScript)
-          ) {
-            delete packageJson.scripts.prebuild;
-            fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
-          }
           EOF
 
       - name: Build Flatpak bundle
