@@ -30,8 +30,9 @@ already has a release for that tag.
 
 The beta package conflicts with `harbor-stremio-bin`: both contain the same
 Harbor executable and desktop integration, so they cannot be installed side by
-side. It is intentionally manual-only for now; a later decision can add a
-per-commit or version-change trigger without changing the package layout.
+side. It runs every five hours and compares the current beta commit with the
+commit encoded in an existing beta release tag. If that exact commit was
+already published, it exits without rebuilding.
 
 ## Trust Model
 
