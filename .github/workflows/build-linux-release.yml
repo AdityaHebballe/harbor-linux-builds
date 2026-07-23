@@ -73,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_call" ]; then
+          if [ -n "${INPUT_SOURCE_REF}" ]; then
             tag="${INPUT_TAG}"
             version="${INPUT_VERSION}"
             source_ref="${INPUT_SOURCE_REF}"
@@ -91,7 +91,7 @@ jobs:
             exit 1
           fi
 
-          if [ "${GITHUB_EVENT_NAME}" != "workflow_call" ]; then
+          if [ -z "${INPUT_SOURCE_REF}" ]; then
             version="${tag#v}"
             tag_commit="$(gh api "repos/harborstremio/harbor/git/ref/tags/${tag}" --jq '.object.sha')"
             compare_status="$(gh api "repos/harborstremio/harbor/compare/7eaf9d4...${tag_commit}" --jq '.status')"
