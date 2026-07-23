@@ -21,6 +21,10 @@ If no tag is provided, the workflow uses the latest upstream Harbor release.
 The scheduled run checks for a new upstream release and exits if this repository
 already has a release for that tag.
 
+Stable releases include Debian, RPM, AppImage, and Flatpak bundle artifacts.
+The Flatpak build is separate from the core release/AUR job, so a Flatpak-only
+failure does not prevent the other three formats from publishing.
+
 ## Beta builds
 
 `Build Harbor Linux Beta` is a separate manual workflow for upstream
@@ -35,7 +39,8 @@ The beta package conflicts with `harbor-stremio-bin`: both contain the same
 Harbor executable and desktop integration, so they cannot be installed side by
 side. It runs every five hours and compares the current beta commit with the
 commit encoded in an existing beta release tag. If that exact commit was
-already published, it exits without rebuilding.
+already published, it exits without rebuilding. Beta releases use the same
+four artifact formats and the same non-blocking Flatpak job.
 
 ## Trust Model
 

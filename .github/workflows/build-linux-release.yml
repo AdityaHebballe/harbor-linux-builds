@@ -212,11 +212,20 @@ jobs:
           let workspace = fs.existsSync(workspacePath)
             ? fs.readFileSync(workspacePath, 'utf8')
             : '';
-          if (!/^allowBuilds:/m.test(workspace)) {
-            workspace += `${workspace.endsWith('\n') || !workspace ? '' : '\n'}allowBuilds:\n  esbuild: true\n`;
-          } else if (!/^\s+esbuild:\s+true\s*$/m.test(workspace)) {
-            workspace = workspace.replace(/^allowBuilds:\s*$/m, 'allowBuilds:\n  esbuild: true');
-          }
+          const setAllowBuild = (name, value) => {
+            const entry = new RegExp(`^(\\s*)${name}:.*$`, 'm');
+            if (entry.test(workspace)) {
+              workspace = workspace.replace(entry, `$1${name}: ${value}`);
+              return;
+            }
+            if (/^allowBuilds:\s*$/m.test(workspace)) {
+              workspace = workspace.replace(/^allowBuilds:\s*$/m, `allowBuilds:\n  ${name}: ${value}`);
+              return;
+            }
+            workspace += `${workspace.endsWith('\n') || !workspace ? '' : '\n'}allowBuilds:\n  ${name}: ${value}\n`;
+          };
+          setAllowBuild('esbuild', 'true');
+          setAllowBuild('protobufjs', 'false');
           fs.writeFileSync(workspacePath, workspace);
           EOF
 
@@ -529,3 +538,65 @@ jobs:
           git add PKGBUILD .SRCINFO
           git commit -m "Update to ${VERSION}"
           git push
+
+  flatpak:
+    name: Build Flatpak bundle
+    needs: [resolve, build]
+    if: needs.resolve.outputs.contains_linux_fix == 'true' && needs.resolve.outputs.should_build == 'true' && inputs.build_scope != 'appimage'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Harbor
+        uses: actions/checkout@v7.0.0
+        with:
+          repository: harborstremio/harbor
+          ref: ${{ needs.resolve.outputs.source_ref }}
+          path: harbor
+
+      - name: Install Flatpak tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils
+
+      - name: Configure Flathub runtimes
+        run: |
+          set -euo pipefail
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub \
+            org.gnome.Platform//49 \
+            org.gnome.Sdk//49 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08 \
+            org.freedesktop.Sdk.Extension.node22//25.08 \
+            org.freedesktop.Sdk.Extension.ffmpeg-full//25.08
+
+      - name: Validate Flatpak metadata
+        working-directory: harbor
+        run: |
+          set -euo pipefail
+          desktop-file-validate flatpak/site.harbor.Harbor.desktop
+          appstreamcli validate --no-net flatpak/site.harbor.Harbor.metainfo.xml
+          flatpak-builder --show-manifest flatpak/site.harbor.Harbor.yml >/dev/null
+
+      - name: Build Flatpak bundle
+        working-directory: harbor
+        run: |
+          set -euo pipefail
+          flatpak-builder --user --force-clean --repo=/tmp/harbor-flatpak-repo /tmp/harbor-flatpak-build flatpak/site.harbor.Harbor.yml
+          flatpak build-bundle /tmp/harbor-flatpak-repo \
+            "../Harbor_${{ needs.resolve.outputs.version }}_x86_64.flatpak" \
+            site.harbor.Harbor
+
+      - name: Validate Flatpak bundle
+        run: |
+          set -euo pipefail
+          flatpak build-import-bundle --update-appstream --no-update-summary \
+            /tmp/harbor-flatpak-validation-repo \
+            "Harbor_${{ needs.resolve.outputs.version }}_x86_64.flatpak"
+
+      - name: Attach Flatpak bundle to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+          ASSET: Harbor_${{ needs.resolve.outputs.version }}_x86_64.flatpak
+        run: gh release upload "${TAG}" "${ASSET}" --repo "${REPOSITORY}" --clobber
