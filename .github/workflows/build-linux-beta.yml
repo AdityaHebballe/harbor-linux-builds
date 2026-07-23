@@ -8,14 +8,6 @@ on:
         required: true
         default: beta-branch
         type: string
-      build_scope:
-        description: Build all Linux release formats or only rebuild the AppImage.
-        required: true
-        type: choice
-        default: all
-        options:
-          - all
-          - appimage
   schedule:
     - cron: "23 */5 * * *"
 
@@ -71,5 +63,4 @@ jobs:
       tag: ${{ needs.resolve.outputs.tag }}
       version: ${{ needs.resolve.outputs.version }}
       channel: beta
-      build_scope: ${{ inputs.build_scope }}
     secrets: inherit
