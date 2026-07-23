@@ -104,6 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           rsync -a --delete packaging/flatpak/ harbor/flatpak/
+          install -Dm644 packaging/flatpak/tauri.flatpak.conf.json harbor/src-tauri/tauri.flatpak.conf.json
 
       - name: Resolve package version
         id: package

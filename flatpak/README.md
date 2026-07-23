@@ -4,6 +4,8 @@ This directory is maintained by the Linux packaging repository. The workflow ove
 it onto an exact Harbor checkout, so it remains the Flatpak source of truth even if
 Harbor removes its own `flatpak/` directory. `source-ref.txt` records the Harbor
 commit used to generate the currently committed dependency sources.
+`tauri.flatpak.conf.json` is the downstream Tauri override that supplies the Flatpak
+application ID and disables native bundle/external-binary handling.
 
 Harbor is built as `site.harbor.Harbor` against the pinned GNOME 49 SDK. mpv is
 built in the sandbox, FFmpeg tools come from the SDK and use the codecs supplied
