@@ -479,14 +479,14 @@ jobs:
             '
 
           cd "${tmpdir}"
-          if git diff --quiet; then
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
             echo "AUR already current."
             exit 0
           fi
 
           git config user.name "Aditya Hebballe"
           git config user.email "adityahebballe@proton.me"
-          git add PKGBUILD .SRCINFO
           git commit -m "Update to ${VERSION}"
           git push
 
