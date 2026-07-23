@@ -562,6 +562,7 @@ jobs:
       - name: Validate Flatpak bundle
         run: |
           set -euo pipefail
+          ostree init --repo=/tmp/harbor-flatpak-validation-repo --mode=archive-z2
           flatpak build-import-bundle --update-appstream --no-update-summary \
             /tmp/harbor-flatpak-validation-repo \
             "Harbor_${{ needs.resolve.outputs.version }}_x86_64.flatpak"
