@@ -51,11 +51,21 @@ jobs:
           set -euo pipefail
           gh release view "${TAG}" --repo "${REPOSITORY}" >/dev/null
 
+      - name: Resolve upstream source ref
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          source_ref="$(gh api "repos/harborstremio/harbor/commits/${INPUT_SOURCE_REF}" --jq '.sha')"
+          echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout Harbor
         uses: actions/checkout@v7.0.0
         with:
           repository: harborstremio/harbor
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ steps.source.outputs.source_ref }}
           path: harbor
 
       - name: Resolve package version
