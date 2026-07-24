@@ -95,15 +95,13 @@ jobs:
           const readmePath = "README.md";
           const releaseUrl = `https://github.com/${process.env.REPOSITORY}/releases/tag/${process.env.TAG}`;
           const readme = fs.readFileSync(readmePath, "utf8");
-          const updatedReadme = readme.replace(
-            /https:\/\/github\.com\/AdityaHebballe\/harbor-linux-builds\/releases\/tag\/beta-v[^)"\s<]+/g,
-            releaseUrl,
-          );
+          const linkPattern = /https:\/\/github\.com\/AdityaHebballe\/harbor-linux-builds\/releases\/tag\/beta-v[^)"\s<]+/g;
 
-          if (updatedReadme === readme) {
+          if (!linkPattern.test(readme)) {
             throw new Error("No beta release links found in README.md");
           }
 
+          const updatedReadme = readme.replace(linkPattern, releaseUrl);
           fs.writeFileSync(readmePath, updatedReadme);
           EOF
 
