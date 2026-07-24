@@ -7,6 +7,10 @@ on:
         description: Harbor commit or ref to build.
         required: true
         type: string
+      source_repo:
+        description: 'GitHub repository to check out Harbor source from (owner/name). Leave blank for harborstremio/harbor.'
+        required: false
+        type: string
       tag:
         description: Existing release tag to receive the Flatpak bundle.
         required: true
@@ -26,6 +30,14 @@ on:
         description: Upstream Harbor commit or ref to build.
         required: true
         type: string
+      source_repo:
+        description: Where to check out Harbor source from.
+        required: false
+        default: upstream
+        type: choice
+        options:
+          - upstream
+          - fork
       tag:
         description: Existing release tag to receive the Flatpak bundle.
         required: true
@@ -77,14 +89,29 @@ jobs:
               ;;
           esac
 
-      - name: Resolve upstream source ref
+      - name: Resolve source repository and ref
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_SOURCE_REPO: ${{ inputs.source_repo }}
         run: |
           set -euo pipefail
-          source_ref="$(gh api "repos/harborstremio/harbor/commits/${INPUT_SOURCE_REF}" --jq '.sha')"
+
+          case "${INPUT_SOURCE_REPO}" in
+            ''|upstream|harborstremio/harbor)
+              source_repo="harborstremio/harbor"
+              ;;
+            fork)
+              source_repo="AdityaHebballe/harbor"
+              ;;
+            *)
+              source_repo="${INPUT_SOURCE_REPO}"
+              ;;
+          esac
+
+          source_ref="$(gh api "repos/${source_repo}/commits/${INPUT_SOURCE_REF}" --jq '.sha')"
+          echo "source_repo=${source_repo}" >> "${GITHUB_OUTPUT}"
           echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout downstream Flatpak configuration
@@ -96,7 +123,7 @@ jobs:
       - name: Checkout Harbor
         uses: actions/checkout@v7.0.0
         with:
-          repository: harborstremio/harbor
+          repository: ${{ steps.source.outputs.source_repo }}
           ref: ${{ steps.source.outputs.source_ref }}
           path: harbor
 

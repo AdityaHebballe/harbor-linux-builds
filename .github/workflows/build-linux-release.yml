@@ -529,13 +529,11 @@ jobs:
   flatpak:
     name: Build Flatpak bundle
     needs: [resolve, build]
-    # build-flatpak.yml always checks out harborstremio/harbor directly, so skip
-    # it for temporary fork-sourced builds (deb/rpm from the resolve/build jobs
-    # above are still produced and published).
-    if: needs.resolve.outputs.contains_linux_fix == 'true' && needs.resolve.outputs.should_build == 'true' && needs.resolve.outputs.source_repo == 'harborstremio/harbor'
+    if: needs.resolve.outputs.contains_linux_fix == 'true' && needs.resolve.outputs.should_build == 'true'
     uses: ./.github/workflows/build-flatpak.yml
     with:
       source_ref: ${{ needs.resolve.outputs.source_ref }}
+      source_repo: ${{ needs.resolve.outputs.source_repo }}
       tag: ${{ needs.resolve.outputs.tag }}
       version: ${{ needs.resolve.outputs.version }}
       channel: ${{ needs.resolve.outputs.channel }}
