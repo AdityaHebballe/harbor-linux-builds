@@ -15,14 +15,19 @@ Unofficial Linux builds of [Harbor](https://github.com/harborstremio/harbor), bu
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>Arch Linux</h3>
+      <h3><img src="https://cdn.simpleicons.org/archlinux/1793D1" width="20" height="20" align="absmiddle" alt="" /> Arch Linux</h3>
       <p>Install from the AUR. Updates arrive through your usual AUR helper.</p>
       <p><a href="https://aur.archlinux.org/packages/harbor-stremio-bin"><strong>Open harbor-stremio-bin on AUR →</strong></a></p>
       <pre><code>paru -S harbor-stremio-bin</code></pre>
       <p><sub>Replace <code>paru</code> with <code>yay</code> if that is your helper.</sub></p>
     </td>
     <td width="50%" valign="top">
-      <h3>Debian, Ubuntu &amp; Mint</h3>
+      <h3>
+        <img src="https://cdn.simpleicons.org/debian/A81D33" width="20" height="20" align="absmiddle" alt="" />
+        <img src="https://cdn.simpleicons.org/ubuntu/E95420" width="20" height="20" align="absmiddle" alt="" />
+        <img src="https://cdn.simpleicons.org/linuxmint/87CF3E" width="20" height="20" align="absmiddle" alt="" />
+        Debian, Ubuntu &amp; Mint
+      </h3>
       <p><a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Download the latest .deb →</strong></a></p>
       <pre><code>cd ~/Downloads
 sudo apt install ./Harbor_*.deb</code></pre>
@@ -30,7 +35,11 @@ sudo apt install ./Harbor_*.deb</code></pre>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>Fedora &amp; openSUSE</h3>
+      <h3>
+        <img src="https://cdn.simpleicons.org/fedora/51A2DA" width="20" height="20" align="absmiddle" alt="" />
+        <img src="https://cdn.simpleicons.org/opensuse/73BA25" width="20" height="20" align="absmiddle" alt="" />
+        Fedora &amp; openSUSE
+      </h3>
       <p><a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Download the latest .rpm →</strong></a></p>
       <p><strong>Fedora</strong></p>
       <pre><code>sudo dnf install ./Harbor-*.rpm</code></pre>
@@ -38,7 +47,7 @@ sudo apt install ./Harbor_*.deb</code></pre>
       <pre><code>sudo zypper install ./Harbor-*.rpm</code></pre>
     </td>
     <td width="50%" valign="top">
-      <h3>Flatpak</h3>
+      <h3><img src="https://cdn.simpleicons.org/flatpak/4A90D9" width="20" height="20" align="absmiddle" alt="" /> Flatpak</h3>
       <p><a href="https://github.com/AdityaHebballe/harbor-linux-builds/releases/latest"><strong>Download the latest .flatpak →</strong></a></p>
       <pre><code>cd ~/Downloads
 flatpak install --user ./Harbor_*.flatpak</code></pre>
